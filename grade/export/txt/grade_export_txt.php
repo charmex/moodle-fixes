@@ -36,8 +36,8 @@ class grade_export_txt extends grade_export {
      * @param boolean $onlyactive
      * @param boolean $usercustomfields include user custom field in export
      */
-    public function __construct($course, $groupid=0, $itemlist='', $export_feedback=false, $updatedgradesonly = false, $displaytype = GRADE_DISPLAY_TYPE_REAL, $decimalpoints = 2, $separator = 'comma', $onlyactive = false, $usercustomfields = false) {
-        parent::__construct($course, $groupid, $itemlist, $export_feedback, $updatedgradesonly, $displaytype, $decimalpoints, $onlyactive, $usercustomfields);
+    public function __construct($courses, $groupid=0, $itemlist='', $export_feedback=false, $updatedgradesonly = false, $displaytype = GRADE_DISPLAY_TYPE_REAL, $decimalpoints = 2, $separator = 'comma', $onlyactive = false, $usercustomfields = false) {
+        parent::__construct($courses, $groupid, $itemlist, $export_feedback, $updatedgradesonly, $displaytype, $decimalpoints, $onlyactive, $usercustomfields);
         $this->separator = $separator;
     }
 
@@ -53,10 +53,16 @@ class grade_export_txt extends grade_export {
         $export_tracking = $this->track_exports();
 
         $strgrades = get_string('grades');
-        $profilefields = grade_helper::get_user_profile_fields($this->course->id, $this->usercustomfields);
+        $courseids = array_map(create_function('$course', 'return $course->id;'), $this->courses);
+        $profilefields = grade_helper::get_user_profile_fields($courseids, $this->usercustomfields);
 
-        $shortname = format_string($this->course->shortname, true, array('context' => context_course::instance($this->course->id)));
-        $downloadfilename = clean_filename("$shortname $strgrades");
+        $filename = $strgrades;
+        if (count($this->courses) == 1) {
+            $filename = format_string(reset($this->courses)->shortname, true,
+                array('context' => context_course::instance(reset($this->courses)->id)));
+            $filename .= " {$strgrades}";
+        }
+        $downloadfilename = clean_filename($filename);
         $csvexport = new csv_export_writer($this->separator);
         $csvexport->set_filename($downloadfilename);
 
@@ -81,7 +87,7 @@ class grade_export_txt extends grade_export {
 
         // Print all the lines of data.
         $geub = new grade_export_update_buffer();
-        $gui = new graded_users_iterator($this->course, $this->columns, $this->groupid);
+        $gui = new graded_users_iterator($this->courses, $this->columns, $this->groupid);
         $gui->require_active_enrolment($this->onlyactive);
         $gui->allow_user_custom_fields($this->usercustomfields);
         $gui->init();

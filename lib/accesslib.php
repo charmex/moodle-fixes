@@ -2155,30 +2155,52 @@ function can_access_course(stdClass $course, $user = null, $withcapability = '',
  * @package   core_enrol
  * @category  access
  *
- * @param context $context
+ * @param context $context or an array of context objects
  * @param string $withcapability
  * @param int $groupid 0 means ignore groups, any other value limits the result by group id
  * @param bool $onlyactive consider only active enrolments in enabled plugins and time restrictions
  * @return array list($sql, $params)
  */
-function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, $onlyactive = false) {
+function get_enrolled_sql($contexts, $withcapability = '', $groupid = 0, $onlyactive = false) {
     global $DB, $CFG;
+
+    if (!is_array($contexts) && is_object($contexts)) {
+        $contexts = array($contexts);
+    }
 
     // use unique prefix just in case somebody makes some SQL magic with the result
     static $i = 0;
     $i++;
     $prefix = 'eu'.$i.'_';
 
-    // first find the course context
-    $coursecontext = $context->get_course_context();
+    // first find the course contexts
+    $coursecontexts = array();
+    $courseids = array();
+    foreach ($contexts as $context) {
+        $coursecontext = $context->get_course_context();
+        $coursecontexts[] = $coursecontext;
+        $courseids[] = $coursecontext->instanceid;
+    }
+    if (count($courseids) > 1 && in_array(SITEID, $courseids)) {
+        // prevent calling this function with multiple contexts, containing front page
+        print_error('enrolledsqlcontextswithfrontpage');
+    }
 
-    $isfrontpage = ($coursecontext->instanceid == SITEID);
+    $isfrontpage = (reset($coursecontexts)->instanceid == SITEID);
 
     $joins  = array();
     $wheres = array();
     $params = array();
 
-    list($contextids, $contextpaths) = get_context_info_list($context);
+    $contextids = array();
+    $contextpaths = array();
+    foreach ($coursecontexts as $context) {
+        list($cids, $cpaths) = get_context_info_list($context);
+        $contextids = array_merge($contextids, $cids);
+        $contextpaths = array_merge($contextpaths, $cpaths);
+    }
+    $contextids = array_unique($contextids);
+    $contextpaths = array_unique($contextpaths);
 
     // get all relevant capability info for all roles
     if ($withcapability) {
@@ -2291,8 +2313,11 @@ function get_enrolled_sql(context $context, $withcapability = '', $groupid = 0, 
         // all users are "enrolled" on the frontpage
     } else {
         $joins[] = "JOIN {user_enrolments} {$prefix}ue ON {$prefix}ue.userid = {$prefix}u.id";
-        $joins[] = "JOIN {enrol} {$prefix}e ON ({$prefix}e.id = {$prefix}ue.enrolid AND {$prefix}e.courseid = :{$prefix}courseid)";
-        $params[$prefix.'courseid'] = $coursecontext->instanceid;
+        list($enrol_insql, $enrol_inparams) =
+            $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, "{$prefix}courseid");
+        $joins[] = "JOIN {enrol} {$prefix}e ON ({$prefix}e.id = {$prefix}ue.enrolid AND {$prefix}e.courseid {$enrol_insql})";
+        $params = array_merge($params, $enrol_inparams);
+        unset($enrol_insql, $enrol_inparams);
 
         if ($onlyactive) {
             $wheres[] = "{$prefix}ue.status = :{$prefix}active AND {$prefix}e.status = :{$prefix}enabled";

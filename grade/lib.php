@@ -35,9 +35,9 @@ require_once($CFG->dirroot . '/grade/export/lib.php');
 class graded_users_iterator {
 
     /**
-     * The couse whose users we are interested in
+     * The courses whose users we are interested in
      */
-    protected $course;
+    protected $courses;
 
     /**
      * An array of grade items or null if only user data was requested
@@ -103,7 +103,7 @@ class graded_users_iterator {
     /**
      * Constructor
      *
-     * @param object $course A course object
+     * @param mixed $courses single course object or array of course objects
      * @param array  $grade_items array of grade items, if not specified only user info returned
      * @param int    $groupid iterate only group users if present
      * @param string $sortfield1 The first field of the users table by which the array of users will be sorted
@@ -111,10 +111,14 @@ class graded_users_iterator {
      * @param string $sortfield2 The second field of the users table by which the array of users will be sorted
      * @param string $sortorder2 The order in which the second sorting field will be sorted (ASC or DESC)
      */
-    public function __construct($course, $grade_items=null, $groupid=0,
+    public function __construct($courses, $grade_items=null, $groupid=0,
                                           $sortfield1='lastname', $sortorder1='ASC',
                                           $sortfield2='firstname', $sortorder2='ASC') {
-        $this->course      = $course;
+        if (is_array($courses)) {
+            $this->courses = $courses;
+        } else {
+            $this->courses = array($courses);
+        }
         $this->grade_items = $grade_items;
         $this->groupid     = $groupid;
         $this->sortfield1  = $sortfield1;
@@ -135,21 +139,35 @@ class graded_users_iterator {
 
         $this->close();
 
-        export_verify_grades($this->course->id);
-        $course_item = grade_item::fetch_course_item($this->course->id);
-        if ($course_item->needsupdate) {
-            // can not calculate all final grades - sorry
-            return false;
-        }
+        $coursecontexts = array();
+        foreach ($this->courses as $course) {
+            $coursecontexts[] = context_course::instance($course->id);
 
-        $coursecontext = context_course::instance($this->course->id);
-        $relatedcontexts = get_related_contexts_string($coursecontext);
+            export_verify_grades($course->id);
+            $course_item = grade_item::fetch_course_item($course->id);
+            if ($course_item->needsupdate) {
+                // can not calculate all final grades - sorry
+                return false;
+            }
+        }
 
         list($gradebookroles_sql, $params) =
             $DB->get_in_or_equal(explode(',', $CFG->gradebookroles), SQL_PARAMS_NAMED, 'grbr');
-        list($enrolledsql, $enrolledparams) = get_enrolled_sql($coursecontext, '', 0, $this->onlyactive);
+        list($enrolledsql, $enrolledparams) = get_enrolled_sql($coursecontexts, '', 0, $this->onlyactive);
 
         $params = array_merge($params, $enrolledparams);
+        unset($enrolledparams);
+
+        $relatedcontexts = array();
+        foreach ($coursecontexts as $context) {
+            $parentcontexts = $context->get_parent_context_ids(true);  // including self
+            $relatedcontexts = array_merge($relatedcontexts, $parentcontexts);
+        }
+        $relatedcontexts = array_unique($relatedcontexts);
+        list($relatedcontexts, $rcontextparams) = $DB->get_in_or_equal($relatedcontexts, SQL_PARAMS_NAMED, 'rctx');
+
+        $params = array_merge($params, $rcontextparams);
+        unset($rcontextparams);
 
         if ($this->groupid) {
             $groupsql = "INNER JOIN {groups_members} gm ON gm.userid = u.id";
@@ -185,7 +203,7 @@ class graded_users_iterator {
         $customfieldssql = '';
         if ($this->allowusercustomfields && !empty($CFG->grade_export_customprofilefields)) {
             $customfieldscount = 0;
-            $customfieldsarray = grade_helper::get_user_profile_fields($this->course->id, $this->allowusercustomfields);
+            $customfieldsarray = grade_helper::get_user_profile_fields($courseids, $this->allowusercustomfields);
             foreach ($customfieldsarray as $field) {
                 if (!empty($field->customid)) {
                     $customfieldssql .= "
@@ -215,11 +233,11 @@ class graded_users_iterator {
                     ORDER BY $order";
         $this->users_rs = $DB->get_recordset_sql($users_sql, $params);
 
+        $this->suspendedusers = array();
         if (!$this->onlyactive) {
-            $context = context_course::instance($this->course->id);
-            $this->suspendedusers = get_suspended_userids($context);
-        } else {
-            $this->suspendedusers = array();
+            foreach ($coursecontexts as $context) {
+                $this->suspendedusers = array_merge($this->suspendedusers, get_suspended_userids($context));
+            }
         }
 
         if (!empty($this->grade_items)) {
@@ -2764,19 +2782,26 @@ abstract class grade_helper {
     /**
      * Returns an array of user profile fields to be included in export
      *
-     * @param int $courseid
+     * @param mixed $courseids single course id or an array of course ids
      * @param bool $includecustomfields
      * @return array An array of stdClass instances with customid, shortname, datatype, default and fullname fields
      */
-    public static function get_user_profile_fields($courseid, $includecustomfields = false) {
+    public static function get_user_profile_fields($courseids, $includecustomfields = false) {
         global $CFG, $DB;
+
+        if (!is_array($courseids)) {
+            $courseids = array($courseids);
+        }
 
         // Gets the fields that have to be hidden
         $hiddenfields = array_map('trim', explode(',', $CFG->hiddenuserfields));
-        $context = context_course::instance($courseid);
-        $canseehiddenfields = has_capability('moodle/course:viewhiddenuserfields', $context);
-        if ($canseehiddenfields) {
-            $hiddenfields = array();
+        foreach ($courseids as $courseid) {
+            $context = context_course::instance($courseid);
+            $canseehiddenfields = has_capability('moodle/course:viewhiddenuserfields', $context);
+            if ($canseehiddenfields) {
+                $hiddenfields = array();
+                break;
+            }
         }
 
         $fields = array();

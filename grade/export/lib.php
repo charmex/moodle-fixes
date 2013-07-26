@@ -28,7 +28,7 @@ abstract class grade_export {
 
     public $grade_items; // list of all course grade items
     public $groupid;     // groupid, 0 means all groups
-    public $course;      // course object
+    public $courses;     // an array of course objects
     public $columns;     // array of grade_items selected for export
 
     public $previewrows;     // number of rows in preview
@@ -45,7 +45,7 @@ abstract class grade_export {
     /**
      * Constructor should set up all the private variables ready to be pulled
      * @access public
-     * @param object $course
+     * @param mixed $courses either a single course object or an array of course objects
      * @param int $groupid id of selected group, 0 means all
      * @param string $itemlist comma separated list of item ids, empty means all
      * @param boolean $export_feedback
@@ -56,10 +56,19 @@ abstract class grade_export {
      * @param boolean $usercustomfields include user custom field in export
      * @note Exporting as letters will lead to data loss if that exported set it re-imported.
      */
-    public function grade_export($course, $groupid=0, $itemlist='', $export_feedback=false, $updatedgradesonly = false, $displaytype = GRADE_DISPLAY_TYPE_REAL, $decimalpoints = 2, $onlyactive = false, $usercustomfields = false) {
-        $this->course = $course;
+    public function grade_export($courses, $groupid=0, $itemlist='', $export_feedback=false, $updatedgradesonly = false, $displaytype = GRADE_DISPLAY_TYPE_REAL, $decimalpoints = 2, $onlyactive = false, $usercustomfields = false) {
+        if (is_array($courses)) {
+            $this->courses = $courses;
+        } else {
+            $this->courses = array($courses);
+        }
         $this->groupid = $groupid;
-        $this->grade_items = grade_item::fetch_all(array('courseid'=>$this->course->id));
+
+        $this->grade_items = array();
+        foreach ($this->courses as $course) {
+            $gradeitems = grade_item::fetch_all(array('courseid' => $course->id));
+            $this->grade_items += $gradeitems;
+        }
 
         //Populating the columns here is required by /grade/export/(whatever)/export.php
         //however index.php, when the form is submitted, will construct the collection here
@@ -121,7 +130,11 @@ abstract class grade_export {
         if (isset($formdata->key)) {
             if ($formdata->key == 1 && isset($formdata->iprestriction) && isset($formdata->validuntil)) {
                 // Create a new key
-                $formdata->key = create_user_key('grade/export', $USER->id, $this->course->id, $formdata->iprestriction, $formdata->validuntil);
+                if (count($this->courses) == 1) {
+                    $formdata->key = create_user_key('grade/export', $USER->id, reset($this->courses)->id, $formdata->iprestriction, $formdata->validuntil);
+                } else {
+                    $formdata->key = null;
+                }
             }
             $this->userkey = $formdata->key;
         }
@@ -213,7 +226,8 @@ abstract class grade_export {
     public function display_preview($require_user_idnumber=false) {
         global $OUTPUT;
 
-        $userprofilefields = grade_helper::get_user_profile_fields($this->course->id, $this->usercustomfields);
+        $courseids = array_map(create_function('$course', 'return $course->id;'), $this->courses);
+        $userprofilefields = grade_helper::get_user_profile_fields($courseids, $this->usercustomfields);
         $formatoptions = new stdClass();
         $formatoptions->para = false;
 
@@ -238,7 +252,7 @@ abstract class grade_export {
         echo '</tr>';
         /// Print all the lines of data.
         $i = 0;
-        $gui = new graded_users_iterator($this->course, $this->columns, $this->groupid);
+        $gui = new graded_users_iterator($this->courses, $this->columns, $this->groupid);
         $gui->require_active_enrolment($this->onlyactive);
         $gui->allow_user_custom_fields($this->usercustomfields);
         $gui->init();
@@ -310,7 +324,18 @@ abstract class grade_export {
             $itemidsparam = '-1';
         }
 
-        $params = array('id'                =>$this->course->id,
+        $courseid = 0;
+        if (count($this->courses) == 1) {
+            $courseid = reset($this->courses)->id;
+        } else {
+            $courseids = array();
+            foreach ($this->courses as $course) {
+                $courseids[] = $course->id;
+            }
+            $courseid = implode(',', $courseids);
+        }
+
+        $params = array('id'                =>$courseid,
                         'groupid'           =>$this->groupid,
                         'itemids'           =>$itemidsparam,
                         'export_letters'    =>$this->export_letters,

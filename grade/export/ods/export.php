@@ -19,7 +19,7 @@ require_once '../../../config.php';
 require_once $CFG->dirroot.'/grade/export/lib.php';
 require_once 'grade_export_ods.php';
 
-$id                = required_param('id', PARAM_INT); // course id
+$id                = required_param('id', PARAM_SEQUENCE); // course ids
 $groupid           = optional_param('groupid', 0, PARAM_INT);
 $itemids           = required_param('itemids', PARAM_RAW);
 $export_feedback   = optional_param('export_feedback', 0, PARAM_BOOL);
@@ -28,24 +28,27 @@ $displaytype       = optional_param('displaytype', $CFG->grade_export_displaytyp
 $decimalpoints     = optional_param('decimalpoints', $CFG->grade_export_decimalpoints, PARAM_INT);
 $onlyactive        = optional_param('export_onlyactive', 0, PARAM_BOOL);
 
-if (!$course = $DB->get_record('course', array('id'=>$id))) {
+list($sqlin, $sqlparams) = $DB->get_in_or_equal(explode(',', $id));
+if (!$courses = $DB->get_records_select('course', "id {$sqlin}", $sqlparams)) {
     print_error('nocourseid');
 }
 
-require_login($course);
-$context = context_course::instance($id);
+foreach ($courses as $course) {
+    require_login($course);
+    $context = context_course::instance($course->id);
 
-require_capability('moodle/grade:export', $context);
-require_capability('gradeexport/ods:view', $context);
+    require_capability('moodle/grade:export', $context);
+    require_capability('gradeexport/ods:view', $context);
 
-if (groups_get_course_groupmode($COURSE) == SEPARATEGROUPS and !has_capability('moodle/site:accessallgroups', $context)) {
-    if (!groups_is_member($groupid, $USER->id)) {
-        print_error('cannotaccessgroup', 'grades');
+    if (groups_get_course_groupmode($course) == SEPARATEGROUPS and !has_capability('moodle/site:accessallgroups', $context)) {
+        if (!groups_is_member($groupid, $USER->id)) {
+            print_error('cannotaccessgroup', 'grades');
+        }
     }
 }
 
 // print all the exported data here
-$export = new grade_export_ods($course, $groupid, $itemids, $export_feedback, $updatedgradesonly, $displaytype, $decimalpoints, $onlyactive, true);
+$export = new grade_export_ods($courses, $groupid, $itemids, $export_feedback, $updatedgradesonly, $displaytype, $decimalpoints, $onlyactive, true);
 $export->print_grades();
 
 

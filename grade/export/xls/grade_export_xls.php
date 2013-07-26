@@ -33,8 +33,13 @@ class grade_export_xls extends grade_export {
         $strgrades = get_string('grades');
 
         // Calculate file name
-        $shortname = format_string($this->course->shortname, true, array('context' => context_course::instance($this->course->id)));
-        $downloadfilename = clean_filename("$shortname $strgrades.xls");
+        $filename = $strgrades;
+        if (count($this->courses) == 1) {
+            $filename = format_string(reset($this->courses)->shortname, true,
+                array('context' => context_course::instance(reset($this->courses)->id)));
+            $filename .= " {$strgrades}";
+        }
+        $downloadfilename = clean_filename("{$filename}.xls");
         // Creating a workbook
         $workbook = new MoodleExcelWorkbook("-");
         // Sending HTTP headers
@@ -43,7 +48,8 @@ class grade_export_xls extends grade_export {
         $myxls = $workbook->add_worksheet($strgrades);
 
         // Print names of all the fields
-        $profilefields = grade_helper::get_user_profile_fields($this->course->id, $this->usercustomfields);
+        $courseids = array_map(create_function('$course', 'return $course->id;'), $this->courses);
+        $profilefields = grade_helper::get_user_profile_fields($courseids, $this->usercustomfields);
         foreach ($profilefields as $id => $field) {
             $myxls->write_string(0, $id, $field->fullname);
         }
@@ -63,7 +69,7 @@ class grade_export_xls extends grade_export {
         // Print all the lines of data.
         $i = 0;
         $geub = new grade_export_update_buffer();
-        $gui = new graded_users_iterator($this->course, $this->columns, $this->groupid);
+        $gui = new graded_users_iterator($this->courses, $this->columns, $this->groupid);
         $gui->require_active_enrolment($this->onlyactive);
         $gui->allow_user_custom_fields($this->usercustomfields);
         $gui->init();

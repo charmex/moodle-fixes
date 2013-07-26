@@ -38,8 +38,13 @@ class grade_export_xml extends grade_export {
         $strgrades = get_string('grades');
 
         /// Calculate file name
-        $shortname = format_string($this->course->shortname, true, array('context' => context_course::instance($this->course->id)));
-        $downloadfilename = clean_filename("$shortname $strgrades.xml");
+        $filename = $strgrades;
+        if (count($this->courses) == 1) {
+            $filename = format_string(reset($this->courses)->shortname, true,
+                array('context' => context_course::instance(reset($this->courses)->id)));
+            $filename .= " {$strgrades}";
+        }
+        $downloadfilename = clean_filename("{$filename}.xml");
 
         make_temp_directory('gradeexport');
         $tempfilename = $CFG->tempdir .'/gradeexport/'. md5(sesskey().microtime().$downloadfilename);
@@ -53,7 +58,7 @@ class grade_export_xml extends grade_export {
         $export_buffer = array();
 
         $geub = new grade_export_update_buffer();
-        $gui = new graded_users_iterator($this->course, $this->columns, $this->groupid);
+        $gui = new graded_users_iterator($this->courses, $this->columns, $this->groupid);
         $gui->require_active_enrolment($this->onlyactive);
         $gui->init();
         while ($userdata = $gui->next_user()) {
