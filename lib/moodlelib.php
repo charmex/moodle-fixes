@@ -3129,16 +3129,20 @@ function require_login($courseorid = NULL, $autologinguest = true, $cm = NULL, $
 
     // Check visibility of activity to current user; includes visible flag, groupmembersonly,
     // conditional availability, etc
-    if ($cm && !$cm->uservisible) {
-        if ($preventredirect) {
-            throw new require_login_exception('Activity is hidden');
+    if ($cm) {
+        if (!$cm->uservisible) {
+            if ($preventredirect) {
+                throw new require_login_exception('Activity is hidden');
+            }
+            if ($course->id != SITEID) {
+                $url = new moodle_url('/course/view.php', array('id'=>$course->id));
+            } else {
+                $url = new moodle_url('/');
+            }
+            redirect($url, get_string('activityiscurrentlyhidden'));
         }
-        if ($course->id != SITEID) {
-            $url = new moodle_url('/course/view.php', array('id'=>$course->id));
-        } else {
-            $url = new moodle_url('/');
-        }
-        redirect($url, get_string('activityiscurrentlyhidden'));
+
+        events_trigger('mod_view', $cm);
     }
 
     // Finally access granted, update lastaccess times
